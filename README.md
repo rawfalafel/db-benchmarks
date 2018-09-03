@@ -1,4 +1,4 @@
-Benchmarks for 3 KV data engines for Golgn: LevelDB, Badger, Bolt. 
+Benchmarks for 3 KV data engines: LevelDB, Badger, Bolt. 
 
 ### Random Write, 1000 entries
 * LevelDB: 4.85s
