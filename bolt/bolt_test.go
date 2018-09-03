@@ -146,17 +146,17 @@ func TestBoltWrite(t *testing.T) {
 	defer db.Close()
 	defer TrackTime(time.Now(), "bolt write")
 
-	randomWrite(t, db, 2<<10)
+	randomWrite(t, db, 1<<17)
 }
 
 func TestBoltRead(t *testing.T) {
 	db := setupBolt(t, true)
 	defer db.Close()
 
-	randomWrite(t, db, 2<<20)
+	randomWrite(t, db, 1<<20)
 	defer TrackTime(time.Now(), "bolt read")
 
-	randomRead(t, db, 2<<10)
+	randomRead(t, db, 1<<20)
 }
 
 func TestBoltConcurrentWrite(t *testing.T) {
@@ -164,5 +164,5 @@ func TestBoltConcurrentWrite(t *testing.T) {
 	defer db.Close()
 
 	defer TrackTime(time.Now(), "bolt concurrent write")
-	concurrentWrite(t, db, 2<<18, 2<<13)
+	concurrentWrite(t, db, 1<<17, 1<<12)
 }

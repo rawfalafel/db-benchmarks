@@ -29,7 +29,7 @@ func randomWrite(t *testing.T, db *badger.DB, size int) {
 	s := rand.NewSource(1)
 	r := rand.New(s)
 
-	for i := 0; i < 2 << 10; i++ {
+	for i := 0; i < size; i++ {
 		key := make([]byte, 32)
 		r.Read(key)
 
@@ -117,9 +117,9 @@ func randomRead(t *testing.T, db *badger.DB, size int) {
 func TestBadgerWrite(t *testing.T) {
 	db := setupBadger(t, true)
 	defer db.Close()
-	defer TrackTime(time.Now(), "badger batch write")
+	defer TrackTime(time.Now(), "badger write")
 
-	randomWrite(t, db, 2 << 10)
+	randomWrite(t, db, 1 << 11)
 }
 
 func TestBadgerBatchWrite(t *testing.T) {
@@ -127,14 +127,14 @@ func TestBadgerBatchWrite(t *testing.T) {
 	defer db.Close()
 
 	defer TrackTime(time.Now(), "badger batch write")
-	batchWrite(t, db, 2 << 18)
+	batchWrite(t, db, 1 << 17)
 }
 
 func TestBadgerRead(t *testing.T) {
 	db := setupBadger(t, false)
 	defer db.Close()
-	batchWrite(t, db, 2 << 20)
+	batchWrite(t, db, 1 << 19)
 
 	defer TrackTime(time.Now(), "badger read")
-	randomRead(t, db, 2 << 20)
+	randomRead(t, db, 1 << 19)
 }

@@ -27,13 +27,14 @@ func setupDB(t *testing.T, noSync bool) *leveldb.DB {
 	return db
 }
 
-func randomWrite(t *testing.T, db *leveldb.DB, size int) {
+func randomWrite(t *testing.T, db *leveldb.DB, size int, sync bool) {
 	s := rand.NewSource(1)
 	r := rand.New(s)
 
 	for i := 0; i < size; i++ {
 		k, v := GenerateKV(r)
-		if err := db.Put(k, v, nil); err != nil {
+		opt := &opt.WriteOptions{ Sync: sync }
+		if err := db.Put(k, v, opt); err != nil {
 			t.Fatalf("failed to put: %v", err)
 		}
 	}
@@ -56,20 +57,49 @@ func randomRead(t *testing.T, db *leveldb.DB, size int) {
 	}
 }
 
+func batchWrite(t *testing.T, db *leveldb.DB, size int, sync bool) {
+	s := rand.NewSource(1)
+	r := rand.New(s)
+
+	partitionSize := 1 << 12
+	numPartitions := size / partitionSize
+
+	for i := 0; i < numPartitions; i++ {
+		batch := new(leveldb.Batch)
+		for j := 0; j < partitionSize; j++ {
+			k, v := GenerateKV(r)
+			batch.Put(k, v)
+		}
+		opt := &opt.WriteOptions{ Sync: sync }
+		err := db.Write(batch, opt)
+		if err != nil {
+			t.Fatalf("failed to batch write: %v", err)
+		}
+	}
+}
+
 func TestLevelDBWrite(t *testing.T) {
-	db := setupDB(t, true)
+	db := setupDB(t, false)
 	defer db.Close()
 
 	defer TrackTime(time.Now(), "leveldb concurrent write")
-	randomWrite(t, db, 2 << 15)
+	randomWrite(t, db, 1 << 9, true)
 }
 
 func TestLevelDBRead(t *testing.T) {
 	db := setupDB(t, true)
 	defer db.Close()
 
-	randomWrite(t, db, 2 << 20)
+	randomWrite(t, db, 1 << 20, false)
 
-	defer TrackTime(time.Now(), "leveldb concurrent write")
-	randomRead(t, db, 2 << 20)
+	defer TrackTime(time.Now(), "leveldb read")
+	randomRead(t, db, 1 << 20)
+}
+
+func TestLevelDBBatchWrite(t *testing.T) {
+	db := setupDB(t, false)
+	defer db.Close()
+
+	defer TrackTime(time.Now(), "leveldb batch write")
+	batchWrite(t, db, 1 << 17, true)
 }
