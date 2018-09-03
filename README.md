@@ -6,9 +6,9 @@ Benchmarks for 3 KV data engines: LevelDB, Badger, Bolt.
 * Bolt: 5.32s
 
 **Space utilization, 1000 entries**
-* LevelDB: 380k
-* Badger: 488k
-* Bolt: 572k
+* LevelDB: 380kb
+* Badger: 488kb
+* Bolt: 572kb
 
 **Random Read, 1M entries**
 * LevelDB: 13.81s
