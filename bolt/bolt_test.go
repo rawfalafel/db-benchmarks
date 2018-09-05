@@ -133,36 +133,181 @@ func concurrentWrite(t *testing.T, db *bolt.DB, size, partitions int) {
 			})
 
 			batchErr = err
-		}(int64(i))
+			}(int64(i))
+		}
+		wg.Wait()
+		if batchErr != nil {
+			t.Fatalf("batch write failed: %v", batchErr)
+		}
 	}
-	wg.Wait()
-	if batchErr != nil {
-		t.Fatalf("batch write failed: %v", batchErr)
+
+	func TestBoltWrite(t *testing.T) {
+		db := setupBolt(t, false)
+		defer db.Close()
+		defer TrackTime(time.Now(), "bolt write")
+
+		randomWrite(t, db, 1<<5)
 	}
-}
 
-func TestBoltWrite(t *testing.T) {
-	db := setupBolt(t, false)
-	defer db.Close()
-	defer TrackTime(time.Now(), "bolt write")
+	func TestBoltRead(t *testing.T) {
+		db := setupBolt(t, true)
+		defer db.Close()
 
-	randomWrite(t, db, 1<<17)
-}
+		randomWrite(t, db, 1<<20)
+		defer TrackTime(time.Now(), "bolt read")
 
-func TestBoltRead(t *testing.T) {
-	db := setupBolt(t, true)
-	defer db.Close()
+		randomRead(t, db, 1<<20)
+	}
 
-	randomWrite(t, db, 1<<20)
-	defer TrackTime(time.Now(), "bolt read")
+	func TestBoltConcurrentWrite(t *testing.T) {
+		db := setupBolt(t, false)
+		defer db.Close()
 
-	randomRead(t, db, 1<<20)
-}
+		defer TrackTime(time.Now(), "bolt concurrent write")
+		concurrentWrite(t, db, 1<<17, 1<<12)
+	}
 
-func TestBoltConcurrentWrite(t *testing.T) {
-	db := setupBolt(t, false)
-	defer db.Close()
+	func TestBucket(t *testing.T) {
+		db := setupBolt(t, false)
+		defer db.Close()
 
-	defer TrackTime(time.Now(), "bolt concurrent write")
-	concurrentWrite(t, db, 1<<17, 1<<12)
-}
+		err := db.Update(func(tx *bolt.Tx) error {
+			b1, err := tx.CreateBucket([]byte("a"))
+			if err != nil {
+				return err
+			}
+
+			b2, err := tx.CreateBucket([]byte("b"))
+			if err != nil {
+				return err
+			}
+
+			b1.Put([]byte("k"), []byte("v-a1"))
+			b2.Put([]byte("k"), []byte("v-b1"))
+
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Update failed: %v", err)
+		}
+
+		err = db.View(func(tx *bolt.Tx) error {
+			b1 := tx.Bucket([]byte("a"))
+			b2 := tx.Bucket([]byte("b"))
+
+			v1 := b1.Get([]byte("k"))
+			v2 := b2.Get([]byte("k"))
+
+			var isSame = true
+			for i := 0; i < len(v1); i++ {
+				if v1[i] != v2[i] {
+					isSame = false
+				}
+			}
+			t.Logf("v1: %v", v1)
+			t.Logf("v2: %v", v2)
+			if isSame {
+				t.Fatalf("values match: %v", v1)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("View failed: %v", err)
+		}
+	}
+
+	func TestFaultyBucket(t *testing.T) {
+		db := setupBolt(t, false)
+		defer db.Close()
+
+		db.View(func (txn *bolt.Tx) error {
+			b, err := txn.CreateBucket([]byte("a"))
+			if err != nil {
+				t.Fatalf("failed to create bucket: %v", err)
+			}
+
+			val := b.Get([]byte("key"))
+			if val != nil {
+				t.Fatalf("should have been empty: %x", val)
+			}
+
+			return nil
+		})
+	}
+
+	func TestTransactions(t *testing.T) {
+		db := setupBolt(t, false)
+		defer db.Close()
+
+		db.Update(func(txn *bolt.Tx) error {
+			if _, err := txn.CreateBucket([]byte("myBucket")); err != nil {
+				t.Fatalf("failed to create bucket: %v", err)
+			}
+			return nil
+		})
+
+		errBuf := make(chan error)
+
+		go func() {
+			timeout := time.After(time.Second * 10)
+			count := byte(0)
+			for {
+				select {
+				case <-timeout:
+					return
+				default:
+					err := db.Update(func(txn *bolt.Tx) error {
+						b := txn.Bucket([]byte("myBucket"))
+
+						v := []byte{count}
+						err1 := b.Put([]byte("k1"), v)
+						err2 := b.Put([]byte("k2"), v)
+						if err1 != nil || err2 != nil {
+							return fmt.Errorf("Put failed: %v %v", err1, err2)
+						}
+						return nil
+					})
+
+					if err != nil {
+						errBuf <- err
+					}
+
+					count++
+
+				}
+			}
+			}()
+
+			go func() {
+				for {
+					db.View(func(txn *bolt.Tx) error {
+						b := txn.Bucket([]byte("myBucket"))
+
+						v1 := b.Get([]byte("k1"))
+						v2 := b.Get([]byte("k2"))
+						if areSlicesEqual(v1, v2) {
+							errBuf <- fmt.Errorf("Mismatch found: %x %x", v1, v2)
+						}
+						return nil
+					})
+				}
+				}()
+			}
+
+			func areSlicesEqual(s1, s2 []byte) bool {
+				if s1 == nil || s2 == nil {
+					return false
+				}
+
+				if len(s1) != len(s2) {
+					return false
+				}
+
+				for i := 0; i < len(s1); i++ {
+					if s1[i] != s2[i] {
+						return false
+					}
+				}
+
+				return true
+			}
