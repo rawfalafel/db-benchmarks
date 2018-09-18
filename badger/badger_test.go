@@ -2,6 +2,7 @@ package badgerBench
 
 import (
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,25 +30,34 @@ func randomWrite(t *testing.T, db *badger.DB, size int) {
 	s := rand.NewSource(1)
 	r := rand.New(s)
 
+	check := func(err error) {
+		if err != nil {
+			t.Fatalf("Update failed: %v", err)
+		}
+	}
+
+	var wg sync.WaitGroup
 	for i := 0; i < size; i++ {
+		wg.Add(1)
 		key := make([]byte, 32)
 		r.Read(key)
 
 		value := make([]byte, 300)
 		r.Read(value)
 
-		err := db.Update(func(txn *badger.Txn) error {
-			if err := txn.Set(key, value); err != nil {
-				return err
-			}
-
-			return nil
-		})
-
-		if err != nil {
-			t.Fatalf("Update failed: %v", err)
-		}
+		txn := db.NewTransaction(true)
+		check(txn.Set(key, value))
+		// Use callback function so many writes can be batched together
+		// internally, to amortize the cost of channels and disk writes.
+		// The write loop is still running serially.
+		// See: https://github.com/dgraph-io/badger#frequently-asked-questions
+		// "My writes are really slow. Why?"
+		check(txn.Commit(func(err error) {
+			check(err)
+			wg.Done()
+		}))
 	}
+	wg.Wait()
 }
 
 func batchWrite(t *testing.T, db *badger.DB, size int) {
@@ -55,7 +65,7 @@ func batchWrite(t *testing.T, db *badger.DB, size int) {
 	r := rand.New(s)
 
 	txn := db.NewTransaction(true)
-	for i:= 0; i < size; i++ {
+	for i := 0; i < size; i++ {
 		key := make([]byte, 32)
 		r.Read(key)
 
@@ -119,7 +129,7 @@ func TestBadgerWrite(t *testing.T) {
 	defer db.Close()
 	defer TrackTime(time.Now(), "badger write")
 
-	randomWrite(t, db, 1 << 11)
+	randomWrite(t, db, 1<<11)
 }
 
 func TestBadgerBatchWrite(t *testing.T) {
@@ -127,14 +137,14 @@ func TestBadgerBatchWrite(t *testing.T) {
 	defer db.Close()
 
 	defer TrackTime(time.Now(), "badger batch write")
-	batchWrite(t, db, 1 << 17)
+	batchWrite(t, db, 1<<17)
 }
 
 func TestBadgerRead(t *testing.T) {
 	db := setupBadger(t, false)
 	defer db.Close()
-	batchWrite(t, db, 1 << 19)
+	batchWrite(t, db, 1<<19)
 
 	defer TrackTime(time.Now(), "badger read")
-	randomRead(t, db, 1 << 19)
+	randomRead(t, db, 1<<19)
 }
